@@ -1,6 +1,6 @@
 {
   "file_server": "localhost:9090",
-  "manager_server": "192.168.177.3:8080",
+  "manager_server": "localhost:8080",
   "log_server": "localhost:7070",
   "directories": [
     "/Users/userName/doc",
