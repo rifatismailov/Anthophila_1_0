@@ -12,36 +12,50 @@ type Logger struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Log надсилає повідомлення до лог-сервера або виводить у консоль.
-// Параметри:
-// - logAddress: адреса сервера логування або "console"
-// - message: текст повідомлення
-// - err: повідомлення про помилку (може бути пустим)
-func Log(logAddress string, message string, err string) {
-	var wg sync.WaitGroup
-	done := make(chan struct{})
+// LoggerService керує логуванням через буферизований канал.
+type LoggerService struct {
+	logAddress string
+	logChan    chan Logger
+	wg         sync.WaitGroup
+}
 
-	logger := Logger{
-		Message: message,
-		Error:   err,
+// NewLoggerService створює новий сервіс логування
+func NewLoggerService(logAddress string) *LoggerService {
+	service := &LoggerService{
+		logAddress: logAddress,
+		logChan:    make(chan Logger, 100), // буфер на 100 повідомлень
 	}
+	service.wg.Add(1)
+	go service.run()
+	return service
+}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		// Тут можна реалізувати відправку на сервер, зараз просто друк
-		if logAddress == "console" {
-			// Вивід у консоль у форматі JSON
-			logJson, _ := json.Marshal(logger)
+// run запускає горутину, яка обробляє лог-повідомлення з каналу
+func (l *LoggerService) run() {
+	defer l.wg.Done()
+	for log := range l.logChan {
+		if l.logAddress == "console" {
+			logJson, _ := json.Marshal(log)
 			fmt.Println(string(logJson))
 		} else {
-			// Тут ти можеш реалізувати відправку logger на сервер logAddress
-			// sendToServer(logAddress, logger)
-			fmt.Printf("Send to log server %s: %s - %s\n", logAddress, message, err)
+			fmt.Printf("Send to log server %s: %s - %s\n", l.logAddress, log.Message, log.Error)
+			// Тут може бути логіка надсилання на сервер
 		}
-		close(done)
-	}()
+	}
+}
 
-	wg.Wait()
+// Log надсилає лог у канал
+func (l *LoggerService) Log(message string, err string) {
+	select {
+	case l.logChan <- Logger{Message: message, Error: err}:
+	default:
+		// Канал заповнений — можна проігнорувати або зробити обробку
+		fmt.Println("[WARN] Log channel full. Dropping log:", message)
+	}
+}
+
+// Close завершує лог-сервіс і чекає, поки всі логи будуть оброблені
+func (l *LoggerService) Close() {
+	close(l.logChan)
+	l.wg.Wait()
 }

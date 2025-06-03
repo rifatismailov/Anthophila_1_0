@@ -3,6 +3,7 @@ package management
 import (
 	"Anthophila/information"
 	"Anthophila/logging"
+	"context"
 	"fmt"
 	"time"
 
@@ -14,17 +15,17 @@ const reconnectInterval = 5 * time.Second
 
 // Manager представляє менеджер WebSocket-зʼєднання
 type Manager struct {
-	LogStatus  bool
-	LogAddress string
+	Logger     *logging.LoggerService // додано
 	ServerAddr string
 	Key        string
+	ctx        context.CancelFunc // для завершення Reader
+
 }
 
 // NewManager — конструктор (фабрика) для створення нового менеджера
-func NewManager(logStatus bool, logAddress, serverAddr, key string) *Manager {
+func NewManager(logger *logging.LoggerService, serverAddr, key string) *Manager {
 	return &Manager{
-		LogStatus:  logStatus,
-		LogAddress: logAddress,
+		Logger:     logger,
 		ServerAddr: serverAddr,
 		Key:        key,
 	}
@@ -33,15 +34,18 @@ func NewManager(logStatus bool, logAddress, serverAddr, key string) *Manager {
 // Start ініціалізує WebSocket-зʼєднання і запускає логіку обміну повідомленнями
 func (m *Manager) Start() {
 	for {
-		if err := m.run(); err != nil && m.LogStatus {
-			logging.Log(m.LogAddress, "Connection error: %v. Retrying in %v...", err.Error())
+		if err := m.run(); err != nil {
+			m.Logger.Log("Connection error: %v. Retrying in %v...", err.Error())
 		}
 		time.Sleep(reconnectInterval)
 	}
 }
 
 func (m *Manager) run() error {
-	cryptoManager, err := NewCryptoManager(m.LogStatus, m.LogAddress, m.Key)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = cancel // зберігаємо cancel для завершення Reader
+
+	cryptoManager, err := NewCryptoManager(m.Logger, m.Key)
 	if err != nil || cryptoManager == nil {
 		return fmt.Errorf("failed to init CryptoManager: %v", err)
 	}
@@ -49,27 +53,27 @@ func (m *Manager) run() error {
 	nickname := information.NewInfo().InfoJson()
 	ws, _, err := websocket.DefaultDialer.Dial(m.ServerAddr, nil)
 	if err != nil {
+		cancel() // скасовуємо контекст, якщо не вдалося підключитись
+
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer ws.Close()
 
 	encryptName := cryptoManager.EncryptText(nickname)
 	if encryptName == "" {
+		cancel() // скасовуємо контекст, якщо не вдалося підключитись
 		err := fmt.Errorf("failed to encrypt nickname")
-		if m.LogStatus {
-			logging.Log(m.LogAddress, "Crypto error", err.Error())
-		}
+		m.Logger.Log("Crypto error", err.Error())
 		return err
 	}
 
 	if err := ws.WriteMessage(websocket.TextMessage, []byte("nick:"+encryptName)); err != nil {
-		if m.LogStatus {
-			logging.Log(m.LogAddress, "WebSocket send error", err.Error())
-		}
+		cancel() // скасовуємо контекст, якщо не вдалося підключитись
+		m.Logger.Log("WebSocket send error", err.Error())
 		return err
 	}
 
-	reader := NewReader(m.LogStatus, m.LogAddress, cryptoManager, ws)
+	reader := NewReader(ctx, m.Logger, cryptoManager, ws)
 	go reader.ReadMessageCommand(ws)
 
 	// Пінг-сервер кожні N секунд
@@ -80,8 +84,13 @@ func (m *Manager) run() error {
 		select {
 		case <-ticker.C:
 			if err := ws.WriteMessage(websocket.TextMessage, []byte("Ping")); err != nil {
-				return fmt.Errorf("ping failed: %w", err)
+				cancel() // скасовуємо контекст, якщо не вдалося підключитись
+				m.Logger.Log("ping failed", err.Error())
+				return err
 			}
+		case <-ctx.Done():
+			return nil // якщо контекст скасовано, виходимо
+
 		}
 	}
 }

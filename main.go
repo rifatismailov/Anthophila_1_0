@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Anthophila/logging"
 	"Anthophila/management"
 	"flag"
 	"fmt"
@@ -27,7 +28,8 @@ var (
 
 func main() {
 	flag.Parse()
-
+	var logger = logging.NewLoggerService("console") // або IP лог-сервера
+	logger.Log("Запуск програми", "")
 	// Зчитування конфігурації з файлу
 	config, err := loadConfig()
 	if err != nil {
@@ -95,13 +97,14 @@ func main() {
 
 		if err := saveConfig(newConfig); err != nil {
 			fmt.Printf("Error saving config: %v\n", err)
+			logger.Log("Програма завершується", "")
+			logger.Close()
 			return
 		}
 	}
-
 	// Ініціалізація та запуск Manager
 	serverAddr := "ws://" + newConfig.ManagerServer + "/ws"
-	manager := management.NewManager(newConfig.LogManagerStatus, newConfig.LogServer, serverAddr, newConfig.Key)
+	manager := management.NewManager(logger, serverAddr, newConfig.Key)
 	manager.Start()
 
 	for {

