@@ -1,13 +1,10 @@
 package management
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -160,41 +157,6 @@ func (tm *TManager) Restart() {
 	}
 }
 
-// runExpectSudoSu запускає expect-скрипт для автоматичного входу під root через sudo su.
-// Приймає пароль як аргумент і повертає помилку у випадку невдачі.
-func runExpectSudoSu(password string) error {
-	// Формуємо expect-скрипт із вбудованим паролем користувача.
-	expectScript := fmt.Sprintf(
-		`#!/usr/bin/expect
-	set timeout -1                    ;# Очікувати без тайм-ауту
-	spawn sudo su                     ;# Запускаємо команду "sudo su"
-	expect "Password:"                ;# Чекаємо на появу запиту пароля
-	send "%s\r"                       ;# Вводимо пароль + carriage return
-	interact                          ;# Передаємо керування користувачу (інтерактивна сесія)`,
-		password,
-	)
-
-	// Шлях до тимчасового файлу для скрипта (автоматично у /tmp/)
-	tmpFile := filepath.Join(os.TempDir(), "sudo_su_script.exp")
-
-	// Записуємо expect-скрипт у тимчасовий файл
-	if err := os.WriteFile(tmpFile, []byte(expectScript), 0700); err != nil {
-		return err // Якщо не вдалося записати — повертаємо помилку
-	}
-
-	// Формуємо команду для запуску expect з нашим скриптом
-	cmd := exec.Command("expect", tmpFile)
-
-	// Привʼязуємо stdin, stdout та stderr до поточних,
-	// щоб користувач міг взаємодіяти з процесом (як у терміналі)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Запускаємо expect-скрипт
-	return cmd.Run()
-}
-
 // runTerminal читає stdout/stderr від процесу терміналу та обробляє команди з каналу input.
 // stdin — канал запису в термінал (введення користувача)
 // stdout, stderr — вихідні потоки з терміналу (відповіді)
@@ -203,42 +165,23 @@ func (tm *TManager) runTerminal(stdin io.WriteCloser, stdout io.Reader, stderr i
 	defer tm.wg.Done()
 
 	// Горутина для читання стандартного виводу (stdout) процесу
-	go func() {
-		defer close(tm.output) // Закриваємо канал output, коли закінчимо читання
-		reader := bufio.NewReader(stdout)
-		for {
-			// Читаємо рядок до символу нового рядка
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					// Процес завершився — виходимо з циклу
-					break
-				}
-				// Помилка читання stdout — відправляємо її у канал output
-				tm.output <- fmt.Sprintf("Error reading stdout: %v", err)
-				break
-			}
-			// Надсилаємо прочитаний рядок у output-канал
-			tm.output <- line
-		}
-	}()
-
+	stdoutReader := NewStdoutReader()
 	// Горутина для читання стандартного потоку помилок (stderr)
+	stderrReader := NewStderrReader()
+
+	stdoutReader.Start(stdout)
+	stderrReader.Start(stderr)
+	// об'єднуємо вивід із обох джерел
 	go func() {
-		reader := bufio.NewReader(stderr)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				tm.output <- fmt.Sprintf("Error reading stderr: %v", err)
-				break
-			}
+		for line := range stdoutReader.Output {
 			tm.output <- line
 		}
 	}()
-
+	go func() {
+		for line := range stderrReader.Output {
+			tm.output <- line
+		}
+	}()
 	// Основний цикл — читає команди з каналу input
 	for command := range tm.input {
 		trimmed := strings.TrimSpace(command)
@@ -251,22 +194,6 @@ func (tm *TManager) runTerminal(stdin io.WriteCloser, stdout io.Reader, stderr i
 
 		// Команда "stop" — нічого не робимо (пропускаємо)
 		if trimmed == "stop" {
-			continue
-		}
-
-		// Обробка спеціальної команди sudo su:<пароль>
-		if strings.HasPrefix(trimmed, "sudo su:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 {
-				password := strings.TrimSpace(parts[1])
-				if err := runExpectSudoSu(password); err != nil {
-					tm.output <- fmt.Sprintf("Expect sudo su failed: %v", err)
-				} else {
-					tm.output <- "Sudo su command executed successfully"
-				}
-			} else {
-				tm.output <- "Invalid sudo su command format"
-			}
 			continue
 		}
 

@@ -77,10 +77,11 @@ func (t *TerminalHandler) listen() { // Запускається як окрем
 			fmt.Printf("User who send command " + (*t.CurrentClient) + "\n")
 
 			// Створюємо структуру повідомлення, яке буде відправлено назад клієнту
+			fmt.Println("Send ", strings.Trim(line, "\n"))
 			msg := Message{
-				SClient: information.NewInfo().GetMACAddress(),                 // MAC-адреса цього пристрою (використовується як ідентифікатор)
-				RClient: *t.CurrentClient,                                      // Кому ми надсилаємо відповідь (клієнт, що надіслав команду)
-				Message: "{\"terminal\":\"" + strings.Trim(line, "\n") + "\"}", // JSON-рядок з відповіддю терміналу
+				SClient: information.NewInfo().GetMACAddress(),           // MAC-адреса цього пристрою (використовується як ідентифікатор)
+				RClient: *t.CurrentClient,                                // Кому ми надсилаємо відповідь (клієнт, що надіслав команду)
+				Message: EscapeTerminalMessage(strings.Trim(line, "\n")), // JSON-рядок з відповіддю терміналу "{\"terminal\":\"" + strings.Trim(line, "\n") + "\"}"
 				// Наприклад: "{\"terminal\":\"total 0\"}"
 			}
 

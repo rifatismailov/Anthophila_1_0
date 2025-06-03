@@ -95,7 +95,7 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 			}
 
 			// 3. Логування розшифрованого тексту
-			r.Logger.Log("Received decrypted message: ", decrypted)
+			fmt.Println("Received decrypted message: ", decrypted)
 
 			// 4. Парсинг JSON
 			var cmd Message
@@ -107,14 +107,14 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 			r.mu.Lock()
 			r.CurrentClient = cmd.SClient
 			r.mu.Unlock()
-			r.Logger.Log("Received text Command: ", string(cmd.Message))
+			fmt.Println("Received text Command: ", string(cmd.Message))
 
 			if cmd.Message == "help" {
 				fmt.Println("Available commands: help, restart, exit, terminal")
 				msg := Message{
 					SClient: information.NewInfo().GetMACAddress(),
 					RClient: cmd.SClient,
-					Message: "{\"terminal\":\"" + cmd.Message + "\"}",
+					Message: EscapeTerminalMessage(cmd.Message),
 				}
 
 				jsonData, err := json.Marshal(msg)

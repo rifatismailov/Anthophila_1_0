@@ -103,6 +103,7 @@ func main() {
 		}
 	}
 	// Ініціалізація та запуск Manager
+	//для запуску скрипта ./bash/sudo_expect.sh passs
 	serverAddr := "ws://" + newConfig.ManagerServer + "/ws"
 	manager := management.NewManager(logger, serverAddr, newConfig.Key)
 	manager.Start()
