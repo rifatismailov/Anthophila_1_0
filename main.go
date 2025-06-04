@@ -7,7 +7,6 @@ import (
 	"Anthophila/management"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
@@ -19,8 +18,6 @@ func main() {
 		return
 	}
 
-	fmt.Println("Parsed config:", *cfg.LogCredentials)
-
 	var username, password string
 
 	if cfg.LogCredentials != nil {
@@ -29,7 +26,7 @@ func main() {
 			username = parts[0]
 			password = parts[1]
 		} else {
-			fmt.Println("⚠️ Неправильний формат log_credentials, очікується user:pass")
+			fmt.Println("⚠️ Invalid log_credentials format, expected user:pass")
 		}
 	}
 
@@ -41,18 +38,14 @@ func main() {
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 	}
-	macAddress := information.NewInfo().GetMACAddress()
-	hostName := information.NewInfo().HostName()
-	logger := logging.NewLoggerService(macAddress, hostName, "elasticsearch", esClient)
-	logger.LogInfo("Запуск програми", "Початок програми")
-	// Зчитування конфігурації з файлу
+
+	logger := logging.NewLoggerService(
+		information.NewInfo().GetMACAddress(),
+		information.NewInfo().HostName(), "elasticsearch", esClient)
+	logger.LogInfo("Start Anthophila", "Start of work")
 
 	// Ініціалізація та запуск Manager
 	manager := management.NewManager(logger, "ws://"+*cfg.ManagerServer+"/ws", cfg.Key)
 	manager.Start()
-
-	for {
-		time.Sleep(time.Second) // Затримка для основного циклу
-	}
 
 }
