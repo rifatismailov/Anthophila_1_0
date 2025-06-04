@@ -4,7 +4,6 @@ import (
 	"Anthophila/information"
 	"Anthophila/logging"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -74,10 +73,10 @@ func (t *TerminalHandler) listen() { // Запускається як окрем
 			// line — це вивід команди, наприклад: "ls -l\n"
 
 			// Друк у консоль: який клієнт надіслав команду
-			fmt.Printf("User who send command " + (*t.CurrentClient) + "\n")
+			//fmt.Printf("User who send command " + (*t.CurrentClient) + "\n")
 
 			// Створюємо структуру повідомлення, яке буде відправлено назад клієнту
-			fmt.Println("Send ", strings.Trim(line, "\n"))
+			//fmt.Println("Send ", strings.Trim(line, "\n"))
 			msg := Message{
 				SClient: information.NewInfo().GetMACAddress(),                       // MAC-адреса цього пристрою (використовується як ідентифікатор)
 				RClient: *t.CurrentClient,                                            // Кому ми надсилаємо відповідь (клієнт, що надіслав команду)

@@ -6,7 +6,6 @@ import (
 
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -96,7 +95,6 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 			}
 
 			// 3. Логування розшифрованого тексту
-			fmt.Println("Received decrypted message: ", decrypted)
 			var raw map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(decrypted), &raw); err != nil {
 				r.Logger.LogError("JSON parsing failed", err.Error())
@@ -105,7 +103,6 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 
 			// 🔍 Визначаємо формат:
 			if _, ok := raw["clientInfo"]; ok {
-				// 🟢 Це реєстрація
 				var reg Registration
 				if err := json.Unmarshal([]byte(decrypted), &reg); err != nil {
 					r.Logger.LogError("Failed to parse registration", err.Error())
@@ -118,10 +115,9 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 					return
 				}
 
-				r.Logger.LogInfo("Реєстрація пройшла", fmt.Sprintf("Host: %s, MAC: %s", info.HostName, info.MACAddress))
+				r.Logger.LogInfo(reg.Message, reg.Status)
 
 			} else if _, ok := raw["sClient"]; ok {
-				// 4. Парсинг JSON
 				var cmd Message
 				if err := json.Unmarshal([]byte(decrypted), &cmd); err != nil {
 					r.Logger.LogError("Failed to unmarshal decrypted JSON:", decrypted)
@@ -131,10 +127,9 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 				r.mu.Lock()
 				r.CurrentClient = cmd.SClient
 				r.mu.Unlock()
-				fmt.Println("Received text Command: ", string(cmd.Message))
+				//fmt.Println("Received text Command: ", string(cmd.Message))
 
 				if cmd.Message == "help" {
-					fmt.Println("Available commands: help, restart, exit, terminal")
 					msg := Message{
 						SClient: information.NewInfo().GetMACAddress(),
 						RClient: cmd.SClient,
@@ -153,7 +148,7 @@ func (r *Reader) ReadMessageCommand(wSocket *websocket.Conn) {
 				} else {
 					if strings.TrimSpace(cmd.Message) == "restart" || strings.TrimSpace(cmd.Message) == "exit_cli" {
 						r.initTerminal(wSocket)
-						r.Logger.LogInfo("Terminal restart: ", "restart")
+						//r.Logger.LogInfo("Terminal restart: ", "restart")
 						continue
 					}
 

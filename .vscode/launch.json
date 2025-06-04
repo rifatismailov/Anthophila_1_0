@@ -1,10 +1,10 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-          {
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
       "name": "Run Anthophila with flags",
       "type": "go",
       "request": "launch",
@@ -13,16 +13,13 @@
       "args": [
         "-file_server=localhost:9090",
         "-manager_server=localhost:8080",
-        "-log_server=localhost:7070",
+        "-log_server=192.168.88.200:9200:elastic:changeme",
         "-directories=/Users/userName/doc,/Users/userName/file",
         "-extensions=.doc,.docx,.xls,.xlsx,.ppt,.pptx",
         "-hour=12",
         "-minute=45",
-        "-key=a very very very very secret key",
-        "-log_file_status=true",
-        "-log_manager_status=true",
-        "-manager_enabled=false"
+        "-key=a very very very very secret key"
       ]
     }
-    ]
+  ]
 }

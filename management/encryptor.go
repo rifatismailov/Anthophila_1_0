@@ -15,10 +15,8 @@ type Encryptor struct {
 }
 
 func NewEncryptor(key string) (*Encryptor, error) {
-	fmt.Println("Створення нового Encryptor з ключем:", key)
-	fmt.Println("Довжина ключа:", len(key))
 	if len(key) != 32 {
-		return nil, fmt.Errorf("ключ повинен мати рівно 32 символи (AES-256)")
+		return nil, fmt.Errorf("the key must have exactly 32 characters (AES-256) key = %v", len(key))
 	}
 	return &Encryptor{Key: []byte(key)}, nil
 }

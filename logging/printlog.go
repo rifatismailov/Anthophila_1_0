@@ -62,6 +62,8 @@ func (l *LoggerService) run() {
 				fmt.Println("Marshal error:", err)
 				continue
 			}
+
+			fmt.Println("Log:", string(body))
 			_, err = l.esClient.Index("logs-go-app", bytes.NewReader(body))
 			if err != nil {
 				fmt.Println("Error sending to Elasticsearch:", err)

@@ -1,40 +1,42 @@
 package main
 
 import (
+	"Anthophila/config"
 	"Anthophila/information"
 	"Anthophila/logging"
 	"Anthophila/management"
-	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
 
-// стандартні параметри під час запуску програми
-var (
-	fileServer       = flag.String("file_server", "localhost:9090", "File Server address")
-	managerServer    = flag.String("manager_server", "localhost:8080", "Manager Server address")
-	logServer        = flag.String("log_server", "localhost:7070", "Log Server address")
-	directories      = flag.String("directories", "", "Comma-separated list of directories")
-	extensions       = flag.String("extensions", ".doc,.docx,.xls,.xlsx,.ppt,.pptx", "Comma-separated list of extensions")
-	hour             = flag.Int("hour", 12, "Hour")
-	minute           = flag.Int("minute", 30, "Minute")
-	key              = flag.String("key", "a very very very very secret key", "Encryption key")
-	logFileStatus    = flag.Bool("log_file_status", false, "Log File Status")
-	logManagerStatus = flag.Bool("log_manager_status", false, "Log Manager Status")
-	managerEnabled   = flag.Bool("manager_enabled", false, "Enable Manager Server")
-)
-
 func main() {
-	flag.Parse()
+	cfg, err := config.ParseOrLoadConfig()
+	if err != nil {
+		fmt.Println("Config error:", err)
+		return
+	}
+
+	fmt.Println("Parsed config:", *cfg.LogCredentials)
+
+	var username, password string
+
+	if cfg.LogCredentials != nil {
+		parts := strings.SplitN(*cfg.LogCredentials, ":", 2)
+		if len(parts) == 2 {
+			username = parts[0]
+			password = parts[1]
+		} else {
+			fmt.Println("⚠️ Неправильний формат log_credentials, очікується user:pass")
+		}
+	}
+
 	esClient, err := elasticsearch.NewClient(elasticsearch.Config{
-		Addresses: []string{"http://192.168.88.200:9200"},
-		Username:  "elastic",
-		Password:  "changeme",
+		Addresses: []string{"http://" + *cfg.LogServer},
+		Username:  username,
+		Password:  password,
 	})
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -44,85 +46,12 @@ func main() {
 	logger := logging.NewLoggerService(macAddress, hostName, "elasticsearch", esClient)
 	logger.LogInfo("Запуск програми", "Початок програми")
 	// Зчитування конфігурації з файлу
-	config, err := loadConfig()
-	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
-	}
 
-	// Отримання домашньої директорії користувача
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Printf("Error getting home directory: %v\n", err)
-		return
-	}
-	// Формування списку директорій
-	var dirs []string
-	// Якщо параметр directories пустий або має значення "?", додаємо стандартні користувацькі директорії
-	if *directories == "" || *directories == "?" {
-		dirs = []string{
-			filepath.Join(homeDir, "Desktop/"),
-			filepath.Join(homeDir, "Documents/"),
-			filepath.Join(homeDir, "Music/"),
-			filepath.Join(homeDir, "Public/"),
-			filepath.Join(homeDir, "Downloads/"),
-		}
-	} else {
-		// Інакше використовуємо директорії, передані як параметр
-		dirs = strings.Split(*directories, ",")
-	}
-	// Створення нового об'єкта конфігурації на основі параметрів командного рядка
-
-	newConfig := &Config{
-		FileServer:       *fileServer,
-		ManagerServer:    *managerServer,
-		LogServer:        *logServer,
-		Directories:      dirs,
-		Extensions:       strings.Split(*extensions, ","),
-		Hour:             *hour,
-		Minute:           *minute,
-		Key:              *key,
-		LogFileStatus:    *logFileStatus,
-		LogManagerStatus: *logManagerStatus,
-		ManagerEnabled:   *managerEnabled,
-	}
-
-	fmt.Println("File Server Address:", newConfig.FileServer)
-	fmt.Println("Manager Server Address:", newConfig.ManagerServer)
-	fmt.Println("Log Server Address:", newConfig.LogServer)
-	fmt.Println("Directories:", newConfig.Directories)
-	fmt.Println("Extensions:", newConfig.Extensions)
-	fmt.Println("Hour:", newConfig.Hour)
-	fmt.Println("Minute:", newConfig.Minute)
-	fmt.Println("Key:", newConfig.Key)
-
-	// Порівняння існуючої конфігурації з новою конфігурацією
-	if config == nil ||
-		config.FileServer != newConfig.FileServer ||
-		config.ManagerServer != newConfig.ManagerServer ||
-		config.LogServer != newConfig.LogServer ||
-		strings.Join(config.Directories, ",") != strings.Join(newConfig.Directories, ",") ||
-		strings.Join(config.Extensions, ",") != strings.Join(newConfig.Extensions, ",") ||
-		config.Hour != newConfig.Hour ||
-		config.Minute != newConfig.Minute ||
-		config.Key != newConfig.Key || config.LogFileStatus != newConfig.LogFileStatus ||
-		config.LogManagerStatus != newConfig.LogManagerStatus || config.ManagerEnabled != newConfig.ManagerEnabled {
-
-		if err := saveConfig(newConfig); err != nil {
-			fmt.Printf("Error saving config: %v\n", err)
-			logger.LogInfo("Програма завершується", "Кінець програми")
-			logger.Close()
-			return
-		}
-	}
 	// Ініціалізація та запуск Manager
-	//для запуску скрипта ./bash/sudo_expect.sh passs
-	serverAddr := "ws://" + newConfig.ManagerServer + "/ws"
-	manager := management.NewManager(logger, serverAddr, newConfig.Key)
+	manager := management.NewManager(logger, "ws://"+*cfg.ManagerServer+"/ws", cfg.Key)
 	manager.Start()
 
 	for {
-		fmt.Println("Main goroutine continues...")
 		time.Sleep(time.Second) // Затримка для основного циклу
 	}
 

@@ -35,7 +35,7 @@ func NewManager(logger *logging.LoggerService, serverAddr, key string) *Manager 
 func (m *Manager) Start() {
 	for {
 		if err := m.run(); err != nil {
-			m.Logger.LogError("Connection error: %v. Retrying in %v...", err.Error())
+			m.Logger.LogError("Connection error", err.Error())
 		}
 		time.Sleep(reconnectInterval)
 	}
@@ -47,7 +47,7 @@ func (m *Manager) run() error {
 
 	cryptoManager, err := NewCryptoManager(m.Logger, m.Key)
 	if err != nil || cryptoManager == nil {
-		return fmt.Errorf("failed to init CryptoManager: %v", err)
+		return fmt.Errorf("Failed to init CryptoManager %v", err)
 	}
 
 	nickname := information.NewInfo().InfoJson()
@@ -55,15 +55,14 @@ func (m *Manager) run() error {
 	if err != nil {
 		cancel() // скасовуємо контекст, якщо не вдалося підключитись
 
-		return fmt.Errorf("failed to connect: %w", err)
+		return fmt.Errorf("Failed to connect: %w", err)
 	}
 	defer ws.Close()
 
 	encryptName := cryptoManager.EncryptText(nickname)
 	if encryptName == "" {
 		cancel() // скасовуємо контекст, якщо не вдалося підключитись
-		err := fmt.Errorf("failed to encrypt nickname")
-		m.Logger.LogError("Crypto error", err.Error())
+		m.Logger.LogError("Crypto error", "Failed to encrypt nickname")
 		return err
 	}
 
