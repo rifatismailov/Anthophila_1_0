@@ -21,7 +21,7 @@ func NewCryptoManager(logger *logging.LoggerService, key string) (*CryptoManager
 func (cm *CryptoManager) EncryptText(text string) string {
 	encrypted, err := cm.Encryptor.EncryptText(text)
 	if err != nil {
-		cm.Logger.Log("Encryption error: ", err.Error())
+		cm.Logger.LogError("Encryption error: ", err.Error())
 		return ""
 	}
 	return encrypted
@@ -30,7 +30,7 @@ func (cm *CryptoManager) EncryptText(text string) string {
 func (cm *CryptoManager) DecryptText(text string) string {
 	decrypted, err := cm.Encryptor.DecryptText(text)
 	if err != nil {
-		cm.Logger.Log("Decryption error: ", err.Error())
+		cm.Logger.LogError("Decryption error: ", err.Error())
 		return ""
 	}
 	return decrypted

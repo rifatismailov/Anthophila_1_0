@@ -79,9 +79,9 @@ func (t *TerminalHandler) listen() { // Запускається як окрем
 			// Створюємо структуру повідомлення, яке буде відправлено назад клієнту
 			fmt.Println("Send ", strings.Trim(line, "\n"))
 			msg := Message{
-				SClient: information.NewInfo().GetMACAddress(),           // MAC-адреса цього пристрою (використовується як ідентифікатор)
-				RClient: *t.CurrentClient,                                // Кому ми надсилаємо відповідь (клієнт, що надіслав команду)
-				Message: EscapeTerminalMessage(strings.Trim(line, "\n")), // JSON-рядок з відповіддю терміналу "{\"terminal\":\"" + strings.Trim(line, "\n") + "\"}"
+				SClient: information.NewInfo().GetMACAddress(),                       // MAC-адреса цього пристрою (використовується як ідентифікатор)
+				RClient: *t.CurrentClient,                                            // Кому ми надсилаємо відповідь (клієнт, що надіслав команду)
+				Message: EscapeTerminalMessage("terminal", strings.Trim(line, "\n")), // JSON-рядок з відповіддю терміналу "{\"terminal\":\"" + strings.Trim(line, "\n") + "\"}"
 				// Наприклад: "{\"terminal\":\"total 0\"}"
 			}
 
@@ -89,7 +89,7 @@ func (t *TerminalHandler) listen() { // Запускається як окрем
 			jsonData, err := json.Marshal(msg)
 			if err != nil {
 				// Якщо помилка при маршалінгу — лог і продовжуємо цикл
-				t.Logger.Log("Marshal error:", err.Error())
+				t.Logger.LogError("Marshal error:", err.Error())
 				continue
 			}
 

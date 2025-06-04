@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Anthophila/information"
 	"Anthophila/logging"
 	"Anthophila/management"
 	"flag"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/elastic/go-elasticsearch/v8"
 )
 
 // стандартні параметри під час запуску програми
@@ -28,8 +31,18 @@ var (
 
 func main() {
 	flag.Parse()
-	var logger = logging.NewLoggerService("console") // або IP лог-сервера
-	logger.Log("Запуск програми", "")
+	esClient, err := elasticsearch.NewClient(elasticsearch.Config{
+		Addresses: []string{"http://192.168.88.200:9200"},
+		Username:  "elastic",
+		Password:  "changeme",
+	})
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+	}
+	macAddress := information.NewInfo().GetMACAddress()
+	hostName := information.NewInfo().HostName()
+	logger := logging.NewLoggerService(macAddress, hostName, "elasticsearch", esClient)
+	logger.LogInfo("Запуск програми", "Початок програми")
 	// Зчитування конфігурації з файлу
 	config, err := loadConfig()
 	if err != nil {
@@ -97,7 +110,7 @@ func main() {
 
 		if err := saveConfig(newConfig); err != nil {
 			fmt.Printf("Error saving config: %v\n", err)
-			logger.Log("Програма завершується", "")
+			logger.LogInfo("Програма завершується", "Кінець програми")
 			logger.Close()
 			return
 		}

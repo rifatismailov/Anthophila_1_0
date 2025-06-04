@@ -186,17 +186,6 @@ func (tm *TManager) runTerminal(stdin io.WriteCloser, stdout io.Reader, stderr i
 	for command := range tm.input {
 		trimmed := strings.TrimSpace(command)
 
-		// Команда "exit" — закриваємо stdin і виходимо
-		if trimmed == "exit" {
-			stdin.Close()
-			return
-		}
-
-		// Команда "stop" — нічого не робимо (пропускаємо)
-		if trimmed == "stop" {
-			continue
-		}
-
 		// Якщо команда — ping без параметру `-c`, додаємо обмеження
 		if strings.HasPrefix(trimmed, "ping ") && !strings.Contains(trimmed, "-c") {
 			parts := strings.Split(trimmed, " ")

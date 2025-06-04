@@ -18,9 +18,9 @@ func ToJSON(data interface{}) string {
 
 // EscapeTerminalMessage формує JSON-повідомлення з полем terminal
 // і гарантує правильне екранування спецсимволів.
-func EscapeTerminalMessage(command string) string {
+func EscapeTerminalMessage(body_command string, command string) string {
 	payload := map[string]string{
-		"terminal": command,
+		body_command: command,
 	}
 	return ToJSON(payload)
 }

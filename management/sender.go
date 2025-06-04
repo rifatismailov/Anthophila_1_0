@@ -34,10 +34,6 @@ func (s *Sender) run() {
 	for msg := range s.sendChan {
 		err := s.ws.WriteMessage(websocket.TextMessage, msg)
 		if err != nil {
-			//s.logger.Log("Send error", err.Error())
-			//fmt.Println("Size message", len(msg))
-			//fmt.Println("Send error", err.Error())
-
 			fmt.Println("Send error:", err)
 
 			// Спробуємо перепідключитись
@@ -65,7 +61,7 @@ func (s *Sender) Send(msg []byte) {
 	case s.sendChan <- msg:
 	default:
 		// якщо канал заповнений
-		s.logger.Log("[WARN] Send channel full. Dropping message", string(msg))
+		s.logger.LogError("[WARN] Send channel full. Dropping message", string(msg))
 	}
 }
 

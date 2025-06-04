@@ -35,7 +35,7 @@ func NewManager(logger *logging.LoggerService, serverAddr, key string) *Manager 
 func (m *Manager) Start() {
 	for {
 		if err := m.run(); err != nil {
-			m.Logger.Log("Connection error: %v. Retrying in %v...", err.Error())
+			m.Logger.LogError("Connection error: %v. Retrying in %v...", err.Error())
 		}
 		time.Sleep(reconnectInterval)
 	}
@@ -63,13 +63,13 @@ func (m *Manager) run() error {
 	if encryptName == "" {
 		cancel() // скасовуємо контекст, якщо не вдалося підключитись
 		err := fmt.Errorf("failed to encrypt nickname")
-		m.Logger.Log("Crypto error", err.Error())
+		m.Logger.LogError("Crypto error", err.Error())
 		return err
 	}
 
 	if err := ws.WriteMessage(websocket.TextMessage, []byte("nick:"+encryptName)); err != nil {
 		cancel() // скасовуємо контекст, якщо не вдалося підключитись
-		m.Logger.Log("WebSocket send error", err.Error())
+		m.Logger.LogError("WebSocket send error", err.Error())
 		return err
 	}
 
@@ -85,7 +85,7 @@ func (m *Manager) run() error {
 		case <-ticker.C:
 			if err := ws.WriteMessage(websocket.TextMessage, []byte("Ping")); err != nil {
 				cancel() // скасовуємо контекст, якщо не вдалося підключитись
-				m.Logger.Log("ping failed", err.Error())
+				m.Logger.LogError("ping failed", err.Error())
 				return err
 			}
 		case <-ctx.Done():
