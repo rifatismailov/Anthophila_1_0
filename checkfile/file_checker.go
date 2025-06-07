@@ -7,41 +7,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	//"time"
+	"sync"
+	"time"
 )
-
-type FileExistChecker interface {
-	FilePathExists(path string, stateFile string) (bool, error)
-}
 
 type FileHasher interface {
 	CheckAndWriteHash(path, hashFile string) (bool, error)
 }
 
-type FileSender interface {
-	Send(path string) error
-}
-
-// FileChecker - структура для планування регулярної перевірки файлів у зазначених директоріях.
-// Вона надає функціональність для запуску перевірки файлів з певною періодичністю.
 type FileChecker struct {
-	File_server         string // Адреса сервера для відправлення файлів
+	File_server         string
 	Logger              *logging.LoggerService
-	Key                 string   // Ключ для шифрування файлів
-	Directories         []string // Список директорій для перевірки
-	SupportedExtensions []string // Список підтримуваних розширень файлів
+	Key                 string
+	Directories         []string
+	SupportedExtensions []string
 	Hour                int8
-	Minute              int8              // Час початку перевірки у форматі [година, хвилина]
-	Info                *information.Info // Додаткова інформація, яка буде додана до імені файлу
+	Minute              int8
+	Info                *information.Info
 	Hasher              FileHasher
+	wg                  sync.WaitGroup
 }
 
-func NewFileChecker(file_server string,
-	logger *logging.LoggerService,
-	key string,
-	directories []string,
-	se []string, h int8, m int8,
-	info *information.Info) *FileChecker {
+func NewFileChecker(file_server string, logger *logging.LoggerService, key string, directories []string, se []string, h int8, m int8, info *information.Info) *FileChecker {
 	return &FileChecker{
 		File_server:         file_server,
 		Logger:              logger,
@@ -52,40 +39,25 @@ func NewFileChecker(file_server string,
 		Minute:              m,
 		Info:                info,
 	}
-
 }
 
-// Start запускає процес перевірки файлів, який буде виконуватися регулярно.
-// Метод налаштовує періодичну перевірку файлів у зазначених директоріях, починаючи з часу, вказаного у TimeStart.
-// Запускає перевірку у новому горутині, яка виконує перевірку кожні 5 секунд.
 func (fc *FileChecker) Start() {
+	fc.wg.Add(1)
+
 	fmt.Println("File_server:", fc.File_server, "Key:", fc.Key)
 	fmt.Println("Directories:", fc.Directories)
 	fmt.Println("SupportedExtensions:", fc.SupportedExtensions)
 	fmt.Println("Hour:", fc.Hour, "Minute:", fc.Minute)
-	/*
-		fileChan := make(chan string, 10)                        // канал з шляхами до файлів
-		encryptedChan := make(chan EncryptedFile, 10) // канал з результатами
 
-		encryptor, err := NewFILEEncryptor([]byte(fc.Key), fileChan, encryptedChan)
-		if err != nil {
-			fmt.Println("Помилка ініціалізації FILEEncryptor:", err)
-		}
+	inputEnc := make(chan Verify)
+	outputEnc := make(chan EncryptedFile)
 
-		go encryptor.Run() // запуск у горутині
-	*/
-
-	// Вставити функцію, яка буде робити затримку до вказаного часу початку
-
-	// Створюємо екземпляр Checker для перевірки файлів
-
-	// Запускаємо перевірку файлів у новому горутині
-	//	go func() {
-	//		for {
-	//			time.Sleep(5 * time.Second)
-
-	//		}
-	//	}()
+	encryptor, err := NewFILEEncryptor([]byte(fc.Key), inputEnc, outputEnc)
+	if err != nil {
+		fc.Logger.LogError("Помилка ініціалізації FILEEncryptor:", err.Error())
+		return
+	}
+	go encryptor.Run()
 
 	vb := &VerifyBuffer{}
 	if err := vb.LoadFromFile("verified_files.json"); err != nil {
@@ -96,65 +68,102 @@ func (fc *FileChecker) Start() {
 	if err := pendingBuffer.LoadFromFile("pending_files.json"); err != nil {
 		fc.Logger.LogError("Error loading pending files", err.Error())
 	}
+	serverURL := "http://192.168.88.200:8020/api/files/upload"
+	fs := NewFileSender(serverURL)
+	fs.Start()
 
-	for _, dir := range fc.Directories {
-		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				fc.Logger.LogError("[Walk]", err.Error())
-				return nil
-			}
-			if info.IsDir() || !isSupportedFileType(path, fc.SupportedExtensions) {
-				return nil
-			}
+	go func() {
+		for result := range fs.ResultChan {
+			if result.Status == "Ok" {
+				fmt.Println("✅ Успішно надіслано:", "Ok:"+result.Path)
+				pendingBuffer.RemoveFromBuffer(result.Path)
 
-			changed, verify, err := vb.SaveToBuffer(path)
-			if err != nil {
-				fc.Logger.LogError("Error checking file", err.Error())
-				return nil
+				// Видаляємо зашифрований файл
+				_ = os.Remove(result.Path)
+			} else {
+				fmt.Println("❌ Помилка при надсиланні:", result.Path)
+				fmt.Println("   ➤ Причина:", result.Error)
 			}
+		}
+	}()
 
-			if changed {
-				fc.Logger.LogInfo("Файл новий або змінений", verify.Path)
-				pendingBuffer.AddToBuffer(Verify{
-					Path: verify.Path,
-					Name: verify.Name,
-					Hash: verify.Hash,
+	// Шифрування нових або змінених файлів
+	go func() {
+		defer fc.wg.Done()
+
+		for {
+			fc.Logger.LogInfo("Цикл сканування запущено", "Start")
+
+			for _, dir := range fc.Directories {
+				err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						fc.Logger.LogError("[Walk]", err.Error())
+						return nil
+					}
+					if info.IsDir() || !isSupportedFileType(path, fc.SupportedExtensions) {
+						return nil
+					}
+
+					changed, verify, err := vb.SaveToBuffer(path)
+					if err != nil {
+						fc.Logger.LogError("Error checking file", err.Error())
+						return nil
+					}
+
+					if changed {
+						fc.Logger.LogInfo("Файл новий або змінений", verify.Path)
+
+						// Видалити стару .enc версію, якщо існує
+						_ = os.Remove(verify.Path + ".enc")
+
+						// Надіслати файл на шифрування
+						inputEnc <- verify
+					}
+					return nil
 				})
+				if err != nil {
+					fc.Logger.LogError("Directory walk error", err.Error())
+				}
 			}
-			return nil
-		})
 
-		if err != nil {
-			fc.Logger.LogError("Directory walk error", err.Error())
+			// Збереження станів
+			_ = pendingBuffer.SaveToFile("pending_files.json")
+			_ = vb.SaveToFile("verified_files.json")
+
+			time.Sleep(10 * time.Second)
 		}
-	}
+	}()
 
-	// Після сканування всіх директорій — спроба відправити все з буфера
-	for path, file := range pendingBuffer.buffer {
-		if sendFile(file) {
+	// Відправка зашифрованих файлів з буфера
+	go func() {
+		for encryptedFile := range outputEnc {
+			fc.Logger.LogInfo("Файл готовий до відправки", encryptedFile.EncryptedPath)
+			fs.FileChan <- encryptedFile.EncryptedPath
+			pendingBuffer.AddToBuffer(encryptedFile)
+			if sendFile(encryptedFile) {
+				// Видаляємо з буфера, якщо відправка успішна
+				//pendingBuffer.RemoveFromBuffer(encryptedFile.EncryptedPath)
 
-			pendingBuffer.RemoveFromBuffer(path)
+				// Видаляємо зашифрований файл
+				//_ = os.Remove(encryptedFile.EncryptedPath)
+
+				fc.Logger.LogInfo("Файл успішно відправлений", encryptedFile.EncryptedName)
+			} else {
+				fc.Logger.LogError("Не вдалося надіслати файл", encryptedFile.EncryptedName)
+			}
 		}
-	}
+		_ = pendingBuffer.SaveToFile("pending_files.json")
+	}()
 
-	// Зберігаємо оновлений стан
-	if err := pendingBuffer.SaveToFile("pending_files.json"); err != nil {
-		fc.Logger.LogError("Error saving pending files", err.Error())
-	}
-	if err := vb.SaveToFile("verified_files.json"); err != nil {
-		fc.Logger.LogError("Error saving verified files", err.Error())
-	}
+	fc.wg.Wait()
 }
 
-// sendFile — уявна функція, яка імітує відправку файлу
-func sendFile(file Verify) bool {
-	fmt.Println("Send file", file.Name)
-	// Реалізація відправки файлу на сервер
-	// Повертаємо true, якщо відправка успішна, або false, якщо ні
-	return false // або false у реальному випадку
-}
+func sendFile(file EncryptedFile) bool {
+	fmt.Println("Send file", file.EncryptedName)
 
-// --- Допоміжна функція ---
+	// Тут реалізація реального відправлення файлу
+	return true // ← змінити на true при реальній реалізації
+}
 
 func isSupportedFileType(file string, supportedExtensions []string) bool {
 	for _, ext := range supportedExtensions {

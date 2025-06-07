@@ -6,9 +6,10 @@ import (
 	"sync"
 )
 
+// PendingFilesBuffer — буфер для зашифрованих файлів, які ще не були відправлені
 type PendingFilesBuffer struct {
 	mu     sync.RWMutex
-	buffer map[string]Verify
+	buffer map[string]EncryptedFile // ключ — EncryptedPath
 }
 
 // LoadFromFile завантажує дані з JSON-файлу
@@ -19,40 +20,36 @@ func (p *PendingFilesBuffer) LoadFromFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			p.buffer = make(map[string]Verify)
+			p.buffer = make(map[string]EncryptedFile)
 			return nil
 		}
 		return err
 	}
 	defer file.Close()
 
-	var list []Verify
+	var list []EncryptedFile
 	if err := json.NewDecoder(file).Decode(&list); err != nil {
 		return err
 	}
 
-	p.buffer = make(map[string]Verify)
+	p.buffer = make(map[string]EncryptedFile)
 	for _, v := range list {
-		p.buffer[v.Path] = v
+		p.buffer[v.EncryptedPath] = v
 	}
 	return nil
 }
 
-// AddToBuffer додає новий файл у буфер
-func (p *PendingFilesBuffer) AddToBuffer(file Verify) {
+// AddToBuffer додає новий зашифрований файл у буфер
+func (p *PendingFilesBuffer) AddToBuffer(file EncryptedFile) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Перевіряємо, чи файл уже є в буфері
-	existing, exists := p.buffer[file.Path] // повертає Verify
-
-	if exists && existing.Hash == file.Hash {
-		// Якщо хеш збігається, файл уже є і не потребує оновлення
+	existing, exists := p.buffer[file.EncryptedPath]
+	if exists && existing.OriginalHash == file.OriginalHash {
+		// Якщо хеш збігається, нічого не робимо
 		return
 	}
-
-	// Якщо файл новий або хеш змінився, додаємо або оновлюємо запис
-	p.buffer[file.Path] = file
+	p.buffer[file.EncryptedPath] = file
 }
 
 // SaveToFile зберігає буфер у JSON-файл
@@ -60,7 +57,7 @@ func (p *PendingFilesBuffer) SaveToFile(path string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	var list []Verify
+	var list []EncryptedFile
 	for _, v := range p.buffer {
 		list = append(list, v)
 	}
@@ -79,4 +76,16 @@ func (p *PendingFilesBuffer) RemoveFromBuffer(filePath string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.buffer, filePath)
+}
+
+// GetAllFiles повертає копію всіх файлів із буфера
+func (p *PendingFilesBuffer) GetAllFiles() []EncryptedFile {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var files []EncryptedFile
+	for _, file := range p.buffer {
+		files = append(files, file)
+	}
+	return files
 }
