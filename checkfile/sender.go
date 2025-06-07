@@ -32,9 +32,9 @@ func (fs *FileSender) Start() {
 		for filePath := range fs.FileChan {
 			err := fs.sendFile(filePath)
 			if err != nil {
-				fs.ResultChan <- Result{Status: "Error", Path: filePath, Error: err}
+				fs.ResultChan <- Result{Status: "4xx", Path: filePath, Error: err}
 			} else {
-				fs.ResultChan <- Result{Status: "Ok", Path: filePath}
+				fs.ResultChan <- Result{Status: "201", Path: filePath}
 			}
 		}
 	}()

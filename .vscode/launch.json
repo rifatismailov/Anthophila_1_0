@@ -11,7 +11,7 @@
       "mode": "auto",
       "program": "${workspaceFolder}",
       "args": [
-        "-file_server=localhost:9090",
+        "-file_server=192.168.88.200:8020",
         "-manager_server=localhost:8080",
         "-log_server=192.168.88.200:9200:elastic:changeme",
         "-directories=/Users/sirius/Desktop/My,/Users/sirius/Desktop/noMy",

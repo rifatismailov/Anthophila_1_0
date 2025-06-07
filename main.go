@@ -4,6 +4,7 @@ import (
 	"Anthophila/config"
 	"Anthophila/information"
 	"Anthophila/logging"
+	"Anthophila/management"
 
 	//"Anthophila/management"
 	"Anthophila/checkfile"
@@ -52,7 +53,7 @@ func main() {
 	file_checker := checkfile.NewFileChecker(*&cfg.FileServer, logger, *&cfg.Key, *&cfg.Directories, *&cfg.Extensions, int8(*&cfg.Hour), int8(*&cfg.Minute), information)
 	file_checker.Start()
 	// Ініціалізація та запуск Manager
-	//manager := management.NewManager(logger, "ws://"+*cfg.ManagerServer+"/ws", cfg.Key)
-	//manager.Start()
+	manager := management.NewManager(logger, "ws://"+*cfg.ManagerServer+"/ws", cfg.Key)
+	manager.Start()
 
 }

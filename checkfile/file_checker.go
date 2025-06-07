@@ -3,7 +3,7 @@ package checkfile
 import (
 	"Anthophila/information"
 	"Anthophila/logging"
-	"fmt"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +25,15 @@ type FileChecker struct {
 	Minute              int8
 	Info                *information.Info
 	Hasher              FileHasher
-	wg                  sync.WaitGroup
+
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	pendingMu sync.Mutex
 }
 
 func NewFileChecker(file_server string, logger *logging.LoggerService, key string, directories []string, se []string, h int8, m int8, info *information.Info) *FileChecker {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &FileChecker{
 		File_server:         file_server,
 		Logger:              logger,
@@ -38,131 +43,112 @@ func NewFileChecker(file_server string, logger *logging.LoggerService, key strin
 		Hour:                h,
 		Minute:              m,
 		Info:                info,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 }
 
 func (fc *FileChecker) Start() {
-	fc.wg.Add(1)
-
-	fmt.Println("File_server:", fc.File_server, "Key:", fc.Key)
-	fmt.Println("Directories:", fc.Directories)
-	fmt.Println("SupportedExtensions:", fc.SupportedExtensions)
-	fmt.Println("Hour:", fc.Hour, "Minute:", fc.Minute)
-
+	fc.Logger.LogInfo("FileChecker запуск", "")
 	inputEnc := make(chan Verify)
 	outputEnc := make(chan EncryptedFile)
 
 	encryptor, err := NewFILEEncryptor([]byte(fc.Key), inputEnc, outputEnc)
 	if err != nil {
-		fc.Logger.LogError("Помилка ініціалізації FILEEncryptor:", err.Error())
+		fc.Logger.LogError("FILEEncryptor помилка:", err.Error())
 		return
 	}
 	go encryptor.Run()
 
 	vb := &VerifyBuffer{}
-	if err := vb.LoadFromFile("verified_files.json"); err != nil {
-		fc.Logger.LogError("Error loading verified files", err.Error())
-	}
+	_ = vb.LoadFromFile("verified_files.json")
 
 	pendingBuffer := &PendingFilesBuffer{}
-	if err := pendingBuffer.LoadFromFile("pending_files.json"); err != nil {
-		fc.Logger.LogError("Error loading pending files", err.Error())
-	}
-	serverURL := "http://192.168.88.200:8020/api/files/upload"
-	fs := NewFileSender(serverURL)
+	_ = pendingBuffer.LoadFromFile("pending_files.json")
+
+	fs := NewFileSender("http://" + fc.File_server + "/api/files/upload")
 	fs.Start()
 
-	go func() {
-		for result := range fs.ResultChan {
-			if result.Status == "Ok" {
-				fmt.Println("✅ Успішно надіслано:", "Ok:"+result.Path)
-				pendingBuffer.RemoveFromBuffer(result.Path)
-
-				// Видаляємо зашифрований файл
-				_ = os.Remove(result.Path)
-			} else {
-				fmt.Println("❌ Помилка при надсиланні:", result.Path)
-				fmt.Println("   ➤ Причина:", result.Error)
-			}
-		}
-	}()
-
-	// Шифрування нових або змінених файлів
+	// 🔄 Обробка результатів
+	fc.wg.Add(1)
 	go func() {
 		defer fc.wg.Done()
-
 		for {
-			fc.Logger.LogInfo("Цикл сканування запущено", "Start")
-
-			for _, dir := range fc.Directories {
-				err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						fc.Logger.LogError("[Walk]", err.Error())
-						return nil
-					}
-					if info.IsDir() || !isSupportedFileType(path, fc.SupportedExtensions) {
-						return nil
-					}
-
-					changed, verify, err := vb.SaveToBuffer(path)
-					if err != nil {
-						fc.Logger.LogError("Error checking file", err.Error())
-						return nil
-					}
-
-					if changed {
-						fc.Logger.LogInfo("Файл новий або змінений", verify.Path)
-
-						// Видалити стару .enc версію, якщо існує
-						_ = os.Remove(verify.Path + ".enc")
-
-						// Надіслати файл на шифрування
-						inputEnc <- verify
-					}
-					return nil
-				})
-				if err != nil {
-					fc.Logger.LogError("Directory walk error", err.Error())
+			select {
+			case <-fc.ctx.Done():
+				return
+			case result := <-fs.ResultChan:
+				if result.Status == "201" {
+					fc.Logger.LogInfo("✅ Надіслано", result.Path)
+					fc.pendingMu.Lock()
+					pendingBuffer.RemoveFromBuffer(result.Path)
+					fc.pendingMu.Unlock()
+					_ = os.Remove(result.Path)
+				} else {
+					fc.Logger.LogError("❌ Надсилання помилка", result.Path+" → "+result.Error.Error())
 				}
 			}
-
-			// Збереження станів
-			_ = pendingBuffer.SaveToFile("pending_files.json")
-			_ = vb.SaveToFile("verified_files.json")
-
-			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	// Відправка зашифрованих файлів з буфера
+	// 🔄 Сканування
+	fc.wg.Add(1)
 	go func() {
-		for encryptedFile := range outputEnc {
-			fc.Logger.LogInfo("Файл готовий до відправки", encryptedFile.EncryptedPath)
-			fs.FileChan <- encryptedFile.EncryptedPath
-			pendingBuffer.AddToBuffer(encryptedFile)
-			if sendFile(encryptedFile) {
-				// Видаляємо з буфера, якщо відправка успішна
-				//pendingBuffer.RemoveFromBuffer(encryptedFile.EncryptedPath)
-
-				// Видаляємо зашифрований файл
-				//_ = os.Remove(encryptedFile.EncryptedPath)
-
-				fc.Logger.LogInfo("Файл успішно відправлений", encryptedFile.EncryptedName)
-			} else {
-				fc.Logger.LogError("Не вдалося надіслати файл", encryptedFile.EncryptedName)
+		defer fc.wg.Done()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-fc.ctx.Done():
+				return
+			case <-ticker.C:
+				for _, dir := range fc.Directories {
+					_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+						if err != nil || info.IsDir() || !isSupportedFileType(path, fc.SupportedExtensions) {
+							return nil
+						}
+						changed, verify, err := vb.SaveToBuffer(path)
+						if err != nil {
+							fc.Logger.LogError("Помилка буфера", err.Error())
+							return nil
+						}
+						if changed {
+							_ = os.Remove(verify.Path + ".enc")
+							inputEnc <- verify
+						}
+						return nil
+					})
+				}
+				fc.pendingMu.Lock()
+				_ = vb.SaveToFile("verified_files.json")
+				_ = pendingBuffer.SaveToFile("pending_files.json")
+				fc.pendingMu.Unlock()
 			}
 		}
-		_ = pendingBuffer.SaveToFile("pending_files.json")
 	}()
 
-	fc.wg.Wait()
+	// 🔄 Обробка шифрування
+	fc.wg.Add(1)
+	go func() {
+		defer fc.wg.Done()
+		for {
+			select {
+			case <-fc.ctx.Done():
+				return
+			case encryptedFile := <-outputEnc:
+				fc.pendingMu.Lock()
+				pendingBuffer.AddToBuffer(encryptedFile)
+				fc.pendingMu.Unlock()
+				fs.FileChan <- encryptedFile.EncryptedPath
+			}
+		}
+	}()
 }
 
-func sendFile(file EncryptedFile) bool {
-	fmt.Println("Send file", file.EncryptedName)
-
-	// Тут реалізація реального відправлення файлу
-	return true // ← змінити на true при реальній реалізації
+func (fc *FileChecker) Stop() {
+	fc.cancel()
+	fc.wg.Wait()
+	fc.Logger.LogInfo("FileChecker зупинено", "")
 }
 
 func isSupportedFileType(file string, supportedExtensions []string) bool {
