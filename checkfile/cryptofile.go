@@ -10,13 +10,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // FILEEncryptor — клас для шифрування файлів із Verify
 type FILEEncryptor struct {
-	Key    []byte               // Ключ AES-256 (32 байти)
-	Input  <-chan Verify        // Канал із файлами на шифрування
-	Output chan<- EncryptedFile // Канал із результатами шифрування
+	Key    []byte
+	Input  <-chan Verify
+	Output chan<- EncryptedFile
+	wg     *sync.WaitGroup
 }
 
 // NewFILEEncryptor — конструктор, перевіряє довжину ключа
@@ -24,10 +26,25 @@ func NewFILEEncryptor(key []byte, input <-chan Verify, output chan<- EncryptedFi
 	if len(key) != 32 {
 		return nil, fmt.Errorf("ключ повинен мати 32 байти для AES-256, отримано %d", len(key))
 	}
-	return &FILEEncryptor{Key: key, Input: input, Output: output}, nil
+	return &FILEEncryptor{
+		Key:    key,
+		Input:  input,
+		Output: output,
+		wg:     nil, // буде встановлено через Start()
+	}, nil
 }
 
-// Run — основний цикл шифрування файлів із каналу Input
+// Start — запускає Run() в окремій горутині
+func (f *FILEEncryptor) Start(wg *sync.WaitGroup) {
+	f.wg = wg
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f.Run()
+	}()
+}
+
+// Run — основний цикл шифрування
 func (f *FILEEncryptor) Run() {
 	block, err := aes.NewCipher(f.Key)
 	if err != nil {
@@ -60,14 +77,12 @@ func (f *FILEEncryptor) Run() {
 		}
 		hashStr := hex.EncodeToString(hash.Sum(nil))
 
-		// Повертаємо курсор у початок
 		if _, err := file.Seek(0, 0); err != nil {
 			file.Close()
 			fmt.Printf("не вдалося перемотати файл: %s\n", err)
 			continue
 		}
 
-		// Генеруємо IV
 		iv := make([]byte, aes.BlockSize)
 		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
 			file.Close()
@@ -77,9 +92,8 @@ func (f *FILEEncryptor) Run() {
 
 		stream := cipher.NewCFBEncrypter(block, iv)
 
-		// Створюємо файл для зашифрованого вмісту
 		encryptedPath := path + ".enc"
-		_ = os.Remove(encryptedPath) // видаляємо стару версію, якщо існує
+		_ = os.Remove(encryptedPath)
 
 		encryptedFile, err := os.Create(encryptedPath)
 		if err != nil {
@@ -88,7 +102,6 @@ func (f *FILEEncryptor) Run() {
 			continue
 		}
 
-		// Записуємо IV
 		if _, err = encryptedFile.Write(iv); err != nil {
 			file.Close()
 			encryptedFile.Close()
@@ -96,7 +109,6 @@ func (f *FILEEncryptor) Run() {
 			continue
 		}
 
-		// Шифруємо файл
 		writer := &cipher.StreamWriter{S: stream, W: encryptedFile}
 		if _, err := io.Copy(writer, file); err != nil {
 			file.Close()
@@ -105,19 +117,15 @@ func (f *FILEEncryptor) Run() {
 			continue
 		}
 
-		// Закриваємо файли
 		file.Close()
 		encryptedFile.Close()
-
-		// Формуємо результат
-		encFileName := filepath.Base(encryptedPath)
 
 		f.Output <- EncryptedFile{
 			OriginalPath:  path,
 			OriginalName:  filepath.Base(path),
 			EncryptedPath: encryptedPath,
 			OriginalHash:  hashStr,
-			EncryptedName: encFileName,
+			EncryptedName: filepath.Base(encryptedPath),
 			OriginalSize:  size,
 		}
 	}
