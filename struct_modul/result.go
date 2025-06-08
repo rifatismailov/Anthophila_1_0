@@ -1,4 +1,4 @@
-package checkfile
+package structmodul
 
 // Структура для результатів
 type Result struct {

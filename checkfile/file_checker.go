@@ -3,6 +3,8 @@ package checkfile
 import (
 	"Anthophila/information"
 	"Anthophila/logging"
+	sm "Anthophila/struct_modul"
+
 	"context"
 	"sync"
 )
@@ -66,6 +68,7 @@ func (fc *FileChecker) Start() {
 	fc.startSender(sender)
 	fc.startResultHandler(sender, pb)
 	fc.startEncryptedHandler(outputEnc, pb, sender)
+	fc.startPendingFileFlusher(pb, sender.FileChan)
 	fc.startScanner(vb, pb, inputEnc)
 }
 
@@ -78,16 +81,16 @@ func (fc *FileChecker) Stop() {
 // --- ПІДМЕТОДИ ---
 
 func (fc *FileChecker) initComponents() (
-	chan Verify,
-	chan EncryptedFile,
+	chan sm.Verify,
+	chan sm.EncryptedFile,
 	*VerifyBuffer,
 	*PendingFilesBuffer,
 	*FILEEncryptor,
 	*FileSender,
 	error,
 ) {
-	inputEnc := make(chan Verify, 100)
-	outputEnc := make(chan EncryptedFile, 100)
+	inputEnc := make(chan sm.Verify, 100)
+	outputEnc := make(chan sm.EncryptedFile, 100)
 
 	vb := &VerifyBuffer{}
 	_ = vb.LoadFromFile("verified_files.json")
@@ -120,12 +123,18 @@ func (fc *FileChecker) startResultHandler(sender *FileSender, pb *PendingFilesBu
 	handler.Start()
 }
 
-func (fc *FileChecker) startEncryptedHandler(output <-chan EncryptedFile, pb *PendingFilesBuffer, sender *FileSender) {
+func (fc *FileChecker) startEncryptedHandler(output <-chan sm.EncryptedFile, pb *PendingFilesBuffer, sender *FileSender) {
 	h := NewEncryptedFileHandler(output, pb, fc.Logger, sender.FileChan, &fc.pendingMu, fc.ctx.Done(), &fc.wg)
 	h.Start()
 }
 
-func (fc *FileChecker) startScanner(vb *VerifyBuffer, pb *PendingFilesBuffer, input chan<- Verify) {
+func (fc *FileChecker) startScanner(vb *VerifyBuffer, pb *PendingFilesBuffer, input chan<- sm.Verify) {
 	scanner := NewScanner(fc.Directories, fc.SupportedExtensions, vb, pb, input, fc.Logger, &fc.pendingMu, fc.ctx.Done(), &fc.wg)
 	scanner.Start()
+}
+
+// startPendingFileFlusher - новий горутін для перевірки сервера та відправки зашифрованих файлів із буфера
+func (fc *FileChecker) startPendingFileFlusher(pb *PendingFilesBuffer, fileChan chan<- string) {
+	flusher := NewPendingFlusher("http://"+fc.File_server+"/api/files", pb, fileChan, fc.Logger, &fc.pendingMu, fc.ctx.Done(), &fc.wg)
+	flusher.Start()
 }

@@ -1,4 +1,4 @@
-package checkfile
+package structmodul
 
 // EncryptedFile — структура з інформацією про зашифрований файл
 type EncryptedFile struct {

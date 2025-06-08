@@ -1,6 +1,15 @@
+///////////////////////////////////////////////////////////////////////////////
+// Package: checkfile
+// Клас: FileSender
+// Опис: Відповідає за відправку файлів на сервер через HTTP-запит.
+//       Отримує шляхи файлів через канал FileChan, надсилає їх і повідомляє
+//       результат через канал ResultChan.
+///////////////////////////////////////////////////////////////////////////////
+
 package checkfile
 
 import (
+	r "Anthophila/struct_modul"
 	"bytes"
 	"fmt"
 	"io"
@@ -10,37 +19,67 @@ import (
 	"path/filepath"
 )
 
-// FileSender відповідає за надсилання файлів через канал
+// /////////////////////////////////////////////////////////////////////////////
+// Структура: FileSender
+//
+// Поля:
+// - ServerURL: адреса сервера, куди надсилаються файли.
+// - FileChan: канал, у який передаються шляхи файлів для надсилання.
+// - ResultChan: канал, у який надсилається результат (успішність/помилка).
+// /////////////////////////////////////////////////////////////////////////////
 type FileSender struct {
-	ServerURL  string
-	FileChan   chan string // Канал, в який передають шляхи до файлів
-	ResultChan chan Result // Канал для результатів відправки
+	ServerURL  string        // URL сервера, куди надсилати файли
+	FileChan   chan string   // Канал для отримання шляхів до файлів
+	ResultChan chan r.Result // Канал для результатів (статус, шлях, помилка)
 }
 
-// NewFileSender створює новий екземпляр FileSender
+// /////////////////////////////////////////////////////////////////////////////
+// Функція: NewFileSender
+// Створює новий екземпляр FileSender з ініціалізованими каналами.
+//
+// Параметри:
+// - serverURL: адреса сервера, куди відправляти файли.
+//
+// Повертає:
+// - *FileSender: вказівник на новий об'єкт FileSender.
+// /////////////////////////////////////////////////////////////////////////////
 func NewFileSender(serverURL string) *FileSender {
 	return &FileSender{
 		ServerURL:  serverURL,
 		FileChan:   make(chan string),
-		ResultChan: make(chan Result),
+		ResultChan: make(chan r.Result),
 	}
 }
 
-// Start запускає горутину для обробки файлів
+// /////////////////////////////////////////////////////////////////////////////
+// Метод: Start
+// Запускає горутину, яка слухає FileChan і викликає sendFile для кожного шляху.
+//
+// Надсилає результат (успіх чи помилка) у ResultChan.
+// /////////////////////////////////////////////////////////////////////////////
 func (fs *FileSender) Start() {
 	go func() {
 		for filePath := range fs.FileChan {
 			err := fs.sendFile(filePath)
 			if err != nil {
-				fs.ResultChan <- Result{Status: "4xx", Path: filePath, Error: err}
+				fs.ResultChan <- r.Result{Status: "4xx", Path: filePath, Error: err}
 			} else {
-				fs.ResultChan <- Result{Status: "201", Path: filePath}
+				fs.ResultChan <- r.Result{Status: "201", Path: filePath}
 			}
 		}
 	}()
 }
 
-// sendFile – приватний метод для надсилання файлу
+// /////////////////////////////////////////////////////////////////////////////
+// Метод: sendFile (приватний)
+// Відправляє файл на сервер у форматі multipart/form-data.
+//
+// Параметри:
+// - filePath: шлях до файлу, який потрібно надіслати.
+//
+// Повертає:
+// - помилку, якщо вона виникла під час відправлення.
+// /////////////////////////////////////////////////////////////////////////////
 func (fs *FileSender) sendFile(filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -51,6 +90,7 @@ func (fs *FileSender) sendFile(filePath string) error {
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
 
+	// Додаємо файл у multipart
 	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
 		return fmt.Errorf("не вдалося створити multipart: %v", err)
@@ -64,12 +104,14 @@ func (fs *FileSender) sendFile(filePath string) error {
 		return fmt.Errorf("не вдалося закрити multipart writer: %v", err)
 	}
 
+	// Створюємо HTTP POST-запит
 	req, err := http.NewRequest("POST", fs.ServerURL, &requestBody)
 	if err != nil {
 		return fmt.Errorf("не вдалося створити HTTP-запит: %v", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
+	// Виконуємо запит
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -77,6 +119,7 @@ func (fs *FileSender) sendFile(filePath string) error {
 	}
 	defer resp.Body.Close()
 
+	// Перевірка статусу відповіді
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("сервер повернув помилку: %s", string(body))
