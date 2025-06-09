@@ -3,6 +3,7 @@ package checkfile
 import (
 	"Anthophila/logging"
 	v "Anthophila/struct_modul"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,10 +111,20 @@ func (s *Scanner) Start() {
 // Перевіряє, чи файл має одне з підтримуваних розширень
 // /////////////////////////////////////////////////////////////////////////////
 func isSupportedFileType(file string, supportedExtensions []string) bool {
+	baseName := filepath.Base(file) // витягуємо тільки імʼя файлу
+
+	// якщо файл починається з "~$", ігноруємо його
+	if strings.HasPrefix(baseName, "~$") {
+		return false
+	}
+
+	// перевірка розширення
 	for _, ext := range supportedExtensions {
 		if strings.HasSuffix(strings.ToLower(file), strings.ToLower(ext)) {
+			fmt.Println(file)
 			return true
 		}
 	}
+
 	return false
 }
