@@ -94,4 +94,4 @@
 
 ---
 
-!\[Logo]\([https://github.com/rifat](https://github.com/rifat)
+![Logo](https://github.com/rifatismailov/Anthophila/blob/master/Anthophila.gif)
