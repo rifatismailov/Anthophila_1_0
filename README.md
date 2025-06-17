@@ -41,10 +41,10 @@
 
 ```bash
 ./Anthophila \
-  -file_server=192.168.88.200:8020 \
+  -file_server=localhost:8020 \
   -manager_server=localhost:8080 \
-  -log_server=192.168.88.200:9200:elastic:changeme \
-  -directories=/Users/sirius/Desktop/My,/Users/sirius/Desktop/noMy \
+  -log_server=localhost:9200:elastic:passwd \
+  -directories=/Users/sirius/Desktop,/Users/sirius/Download \
   -extensions=.doc,.docx,.xls,.xlsx,.ppt,.pptx \
   -hour=12 \
   -minute=45 \
@@ -63,7 +63,7 @@
 * Вказати правилні адреса серверів
 * Правильні директорії (наприклад: `/Users/username/Desktop,/Users/username/Documents`)
 * Типи файлів: `.doc,.docx,.xls,.xlsx,.ppt,.pptx`
-* Час сканування: `-hour=12 -minute=45`
+* Інтервал сканування: `-hour=12 -minute=45`
 * Ключ шифрування: `-key="..."`
 
 ---
