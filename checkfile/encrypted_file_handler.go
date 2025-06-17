@@ -15,22 +15,22 @@ import (
 // /////////////////////////////////////////////////////////////////////////////
 // EncryptedFileHandler
 // Поля:
-// - OutputChan: канал для отримання зашифрованих файлів.
+// - Input_enc_file: канал для отримання зашифрованих файлів.
 // - PendingBuffer: буфер файлів, які ще не були відправлені на сервер.
 // - Logger: сервіс для логування подій.
-// - FileChan: канал, через який передається шлях файлу у FileSender.
+// - Output_to_send_enc_file: канал, через який передається шлях файлу у FileSender.
 // - Mutex: м’ютекс для синхронізації доступу до PendingBuffer.
 // - ctx: канал сигналу завершення виконання горутини.
 // - wg: вказівник на sync.WaitGroup, використовується для очікування завершення горутин.
 // /////////////////////////////////////////////////////////////////////////////
 type EncryptedFileHandler struct {
-	OutputChan    <-chan sm.EncryptedFile // Канал отримання зашифрованих файлів
-	PendingBuffer *PendingFilesBuffer     // Буфер очікування
-	Logger        *logging.LoggerService  // Логер
-	FileChan      chan<- string           // Канал для відправки шляху файлу
-	Mutex         *sync.Mutex             // М’ютекс для синхронізації буфера
-	ctx           <-chan struct{}         // Контекст завершення
-	wg            *sync.WaitGroup         // Синхронізація горутин
+	Input_enc_file          <-chan sm.EncryptedFile // Канал отримання зашифрованих файлів
+	PendingBuffer           *PendingFilesBuffer     // Буфер очікування
+	Logger                  *logging.LoggerService  // Логер
+	Output_to_send_enc_file chan<- string           // Канал для відправки шляху файлу
+	Mutex                   *sync.Mutex             // М’ютекс для синхронізації буфера
+	ctx                     <-chan struct{}         // Контекст завершення
+	wg                      *sync.WaitGroup         // Синхронізація горутин
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -38,22 +38,22 @@ type EncryptedFileHandler struct {
 // Опис: Конструктор, створює новий об'єкт EncryptedFileHandler
 // /////////////////////////////////////////////////////////////////////////////
 func NewEncryptedFileHandler(
-	outputChan <-chan sm.EncryptedFile,
+	input_enc_file <-chan sm.EncryptedFile,
 	pendingBuffer *PendingFilesBuffer,
 	logger *logging.LoggerService,
-	fileChan chan<- string,
+	output_to_send_enc_file chan<- string,
 	mutex *sync.Mutex,
 	ctx <-chan struct{},
 	wg *sync.WaitGroup,
 ) *EncryptedFileHandler {
 	return &EncryptedFileHandler{
-		OutputChan:    outputChan,
-		PendingBuffer: pendingBuffer,
-		Logger:        logger,
-		FileChan:      fileChan,
-		Mutex:         mutex,
-		ctx:           ctx,
-		wg:            wg,
+		Input_enc_file:          input_enc_file,
+		PendingBuffer:           pendingBuffer,
+		Logger:                  logger,
+		Output_to_send_enc_file: output_to_send_enc_file,
+		Mutex:                   mutex,
+		ctx:                     ctx,
+		wg:                      wg,
 	}
 }
 
@@ -72,11 +72,11 @@ func (h *EncryptedFileHandler) Start() {
 			select {
 			case <-h.ctx:
 				return
-			case encryptedFile := <-h.OutputChan:
+			case encryptedFile := <-h.Input_enc_file:
 				h.Mutex.Lock()
 				h.PendingBuffer.AddToBuffer(encryptedFile)
 				h.Mutex.Unlock()
-				h.FileChan <- encryptedFile.EncryptedPath
+				h.Output_to_send_enc_file <- encryptedFile.EncryptedPath
 			}
 		}
 	}()

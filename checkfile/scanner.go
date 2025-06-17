@@ -21,7 +21,7 @@ type Scanner struct {
 	SupportedExtensions []string               // Підтримувані розширення файлів
 	VerifyBuffer        *VerifyBuffer          // Буфер перевірених файлів і хешів
 	PendingBuffer       *PendingFilesBuffer    // Буфер файлів, що очікують надсилання
-	InputChan           chan<- v.Verify        // Канал для передачі файлів на шифрування
+	Input_to_enc_file   chan<- v.Verify        // Канал для передачі файлів на шифрування
 	Logger              *logging.LoggerService // Сервіс логування
 	Mutex               *sync.Mutex            // М'ютекс для синхронізації доступу до буферів
 	ctx                 <-chan struct{}        // Контекст для завершення роботи горутини
@@ -37,7 +37,7 @@ func NewScanner(
 	supportedExtensions []string,
 	verifyBuffer *VerifyBuffer,
 	pendingBuffer *PendingFilesBuffer,
-	inputChan chan<- v.Verify,
+	input_to_enc_file chan<- v.Verify,
 	logger *logging.LoggerService,
 	mutex *sync.Mutex,
 	ctx <-chan struct{},
@@ -48,7 +48,7 @@ func NewScanner(
 		SupportedExtensions: supportedExtensions,
 		VerifyBuffer:        verifyBuffer,
 		PendingBuffer:       pendingBuffer,
-		InputChan:           inputChan,
+		Input_to_enc_file:   input_to_enc_file,
 		Logger:              logger,
 		Mutex:               mutex,
 		ctx:                 ctx,
@@ -85,8 +85,8 @@ func (s *Scanner) Start() {
 						}
 						if changed {
 							s.Logger.LogInfo("Modified file found", verify.Path)
-							_ = os.Remove(verify.Path + ".enc")
-							s.InputChan <- verify
+							deleteFile(verify.Path + ".enc") // видаляємо старший зашифрований файл якшо він є
+							s.Input_to_enc_file <- verify    // передаємо verify у канал для шифрування
 						}
 						return nil
 					})
@@ -104,6 +104,20 @@ func (s *Scanner) Start() {
 			}
 		}
 	}()
+}
+
+func deleteFile(encPath string) error {
+	if _, err := os.Stat(encPath); err == nil {
+		// Файл існує, видаляємо
+		if err := os.Remove(encPath); err != nil {
+			return fmt.Errorf("помилка при видаленні файлу %s: %v", encPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		// Інша помилка доступу до файлу (не пов’язана з неіснуванням)
+		return fmt.Errorf("помилка при перевірці існування файлу %s: %v", encPath, err)
+	}
+
+	return nil // Успішне завершення
 }
 
 // /////////////////////////////////////////////////////////////////////////////

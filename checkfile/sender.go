@@ -24,13 +24,13 @@ import (
 //
 // Поля:
 // - ServerURL: адреса сервера, куди надсилаються файли.
-// - FileChan: канал, у який передаються шляхи файлів для надсилання.
+// - Iutput_to_send_enc_file: канал, у який передаються шляхи файлів для надсилання.
 // - ResultChan: канал, у який надсилається результат (успішність/помилка).
 // /////////////////////////////////////////////////////////////////////////////
 type FileSender struct {
-	ServerURL  string        // URL сервера, куди надсилати файли
-	FileChan   chan string   // Канал для отримання шляхів до файлів
-	ResultChan chan r.Result // Канал для результатів (статус, шлях, помилка)
+	ServerURL               string        // URL сервера, куди надсилати файли
+	Iutput_to_send_enc_file chan string   // Канал для отримання шляхів до файлів
+	ResultChan              chan r.Result // Канал для результатів (статус, шлях, помилка)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -45,9 +45,9 @@ type FileSender struct {
 // /////////////////////////////////////////////////////////////////////////////
 func NewFileSender(serverURL string) *FileSender {
 	return &FileSender{
-		ServerURL:  serverURL,
-		FileChan:   make(chan string),
-		ResultChan: make(chan r.Result),
+		ServerURL:               serverURL,
+		Iutput_to_send_enc_file: make(chan string),
+		ResultChan:              make(chan r.Result),
 	}
 }
 
@@ -59,7 +59,7 @@ func NewFileSender(serverURL string) *FileSender {
 // /////////////////////////////////////////////////////////////////////////////
 func (fs *FileSender) Start() {
 	go func() {
-		for filePath := range fs.FileChan {
+		for filePath := range fs.Iutput_to_send_enc_file {
 			err := fs.sendFile(filePath)
 			if err != nil {
 				fs.ResultChan <- r.Result{Status: "4xx", Path: filePath, Error: err}

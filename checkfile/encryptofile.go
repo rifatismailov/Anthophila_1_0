@@ -33,10 +33,10 @@ import (
 // - wg: вказівник на WaitGroup для контролю завершення горутини
 // /////////////////////////////////////////////////////////////////////////////
 type FILEEncryptor struct {
-	Key    []byte                  // AES-256 ключ (обовʼязково 32 байти)
-	Input  <-chan sm.Verify        // Канал для вхідних файлів
-	Output chan<- sm.EncryptedFile // Канал для вихідних зашифрованих файлів
-	wg     *sync.WaitGroup         // Синхронізація виконання (встановлюється в Start)
+	Key               []byte                  // AES-256 ключ (обовʼязково 32 байти)
+	Input_to_enc_file <-chan sm.Verify        // Канал для вхідних файлів
+	Output_enc_file   chan<- sm.EncryptedFile // Канал для вихідних зашифрованих файлів
+	wg                *sync.WaitGroup         // Синхронізація виконання (встановлюється в Start)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -45,15 +45,15 @@ type FILEEncryptor struct {
 //
 // Повертає помилку, якщо ключ не 32 байти.
 // /////////////////////////////////////////////////////////////////////////////
-func NewFILEEncryptor(key []byte, input <-chan sm.Verify, output chan<- sm.EncryptedFile) (*FILEEncryptor, error) {
+func NewFILEEncryptor(key []byte, input_to_enc_file <-chan sm.Verify, output_enc_file chan<- sm.EncryptedFile) (*FILEEncryptor, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("ключ повинен мати 32 байти для AES-256, отримано %d", len(key))
 	}
 	return &FILEEncryptor{
-		Key:    key,
-		Input:  input,
-		Output: output,
-		wg:     nil, // буде заданий у Start()
+		Key:               key,
+		Input_to_enc_file: input_to_enc_file,
+		Output_enc_file:   output_enc_file,
+		wg:                nil, // буде заданий у Start()
 	}, nil
 }
 
@@ -89,7 +89,7 @@ func (f *FILEEncryptor) Run() {
 		panic(fmt.Sprintf("не вдалося ініціалізувати AES: %v", err))
 	}
 
-	for verify := range f.Input {
+	for verify := range f.Input_to_enc_file {
 		path := verify.Path
 
 		file, err := os.Open(path)
@@ -130,7 +130,6 @@ func (f *FILEEncryptor) Run() {
 		}
 
 		stream := cipher.NewCFBEncrypter(block, iv)
-
 		// Створення нового шляху для зашифрованого файлу
 		encryptedPath := path + ".enc"
 		_ = os.Remove(encryptedPath)
@@ -163,7 +162,7 @@ func (f *FILEEncryptor) Run() {
 		encryptedFile.Close()
 
 		// Передаємо результат далі
-		f.Output <- sm.EncryptedFile{
+		f.Output_enc_file <- sm.EncryptedFile{
 			OriginalPath:  path,
 			OriginalName:  filepath.Base(path),
 			EncryptedPath: encryptedPath,
